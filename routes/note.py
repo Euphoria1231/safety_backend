@@ -179,7 +179,7 @@ def create_note():
             'data': {
                 'note': new_note.to_dict()
             }
-        }), 201
+        }), 200
     
     except ValidationError as e:
         return jsonify({

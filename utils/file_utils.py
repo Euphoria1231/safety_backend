@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime
 from werkzeug.utils import secure_filename
 
-ALLOWED_EXTENSIONS = {'eeg', 'dat', 'txt', 'bin', 'xls', 'xlsx', 'csv'}  # 脑电波文件的允许扩展名
+ALLOWED_EXTENSIONS = {'eeg', 'dat', 'txt', 'bin', 'xls', 'xlsx', 'csv', 'npz'}  # 脑电波文件的允许扩展名
 ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}  # 允许的图片扩展名
 UPLOAD_FOLDER = 'static/upload'
 

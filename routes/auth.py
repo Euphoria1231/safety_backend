@@ -28,8 +28,8 @@ class ChangePasswordSchema(Schema):
 
 class UpdateProfileSchema(Schema):
     """更新个人信息请求验证模式"""
-    username = fields.Str(required=True, validate=validate.Length(min=2, max=30))
-    email = fields.Email(missing=None)
+    username = fields.Str(required=False, validate=validate.Length(min=2, max=30))
+    email = fields.Email(required=False, allow_none=True)
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
@@ -192,7 +192,7 @@ def brain_wave_login():
         if not allowed_file(file.filename):
             return jsonify({
                 'code': 1,
-                'message': '不支持的文件类型，请上传 EEG、DAT、TXT 或 BIN 格式的文件',
+                'message': '不支持的文件类型，请上传 NPZ、EEG、DAT、TXT 或 BIN 格式的文件',
                 'data': None
             }), 400
             
@@ -205,15 +205,23 @@ def brain_wave_login():
                 'data': None
             }), 500
             
-        # 随机概率查询用户（50%概率找到，50%概率未找到）
+        # 使用EEG算法查询用户
         user = User.find_by_brain_wave_file(file_path)
         
         # 如果未找到用户，则创建新用户
         is_new_user = False
         
         if not user:
-            # 创建新用户（使用默认密码123456）
-            user, default_password = User.create_with_brain_wave(file_path)
+            # 创建新用户（使用EEG算法注册）
+            result = User.create_with_brain_wave(file_path)
+            if not result:
+                return jsonify({
+                    'code': 1,
+                    'message': '脑电波数据处理失败，无法创建用户',
+                    'data': None
+                }), 500
+                
+            user, default_password = result
             db.session.add(user)
             db.session.commit()
             is_new_user = True
@@ -294,7 +302,7 @@ def update_brain_wave():
         if not allowed_file(file.filename):
             return jsonify({
                 'code': 1,
-                'message': '不支持的文件类型，请上传 EEG、DAT、TXT 或 BIN 格式的文件',
+                'message': '不支持的文件类型，请上传 NPZ、EEG、DAT、TXT 或 BIN 格式的文件',
                 'data': None
             }), 400
             
@@ -304,7 +312,7 @@ def update_brain_wave():
                 os.remove(os.path.join(os.getcwd(), user.brain_wave_file))
             except:
                 # 忽略删除失败的错误
-                pass
+                print(f"删除脑电波文件失败：{os.path.join(os.getcwd(), user.brain_wave_file)}")
             
         # 保存新文件
         file_path = save_uploaded_file(file, subfolder='brain_wave')
@@ -315,8 +323,14 @@ def update_brain_wave():
                 'data': None
             }), 500
             
-        # 更新用户脑电波文件路径
-        user.brain_wave_file = file_path
+        # 使用EEG算法更新用户脑电波文件
+        if not user.update_brain_wave_file(file_path):
+            return jsonify({
+                'code': 1,
+                'message': '脑电波数据处理失败，文件更新失败',
+                'data': None
+            }), 500
+            
         db.session.commit()
         
         # 返回成功响应
@@ -449,7 +463,7 @@ def update_profile():
     修改个人信息接口
     ---
     请求参数:
-        - username: 用户名，字符串，必填，长度2-30
+        - username: 用户名，字符串，选填，长度2-30
         - email: 邮箱，字符串，选填，符合邮箱格式
         - avatar: 头像文件，文件类型，选填，支持jpg、jpeg、png、gif格式
     返回响应:
@@ -458,9 +472,15 @@ def update_profile():
         - data: 更新后的用户信息
     """
     try:
+        print("\033[32m=== 开始处理更新个人信息请求 ===\033[0m")
+        print("\033[32m请求表单数据：{}\033[0m".format(request.form))
+        print("\033[32m请求文件：{}\033[0m".format(request.files))
+        
         # 获取当前登录用户
         current_user_id = get_jwt_identity()
         user = User.query.get(int(current_user_id))
+        print("\033[32m当前用户ID：{}\033[0m".format(current_user_id))
+        print("\033[32m当前用户信息：{}\033[0m".format(user.to_dict() if user else None))
         
         if not user:
             return jsonify({
@@ -471,27 +491,36 @@ def update_profile():
 
         # 处理表单数据
         form_data = {}
+        print("\033[32m请求表单数据：{}\033[0m".format(request.form))
         if request.form.get('username'):
             form_data['username'] = request.form.get('username')
         if request.form.get('email'):
             form_data['email'] = request.form.get('email')
 
+        print("\033[32m处理后的表单数据：{}\033[0m".format(form_data))
+
         # 验证表单数据
         schema = UpdateProfileSchema()
         data = schema.load(form_data)
+        print("\033[32mSchema验证后的数据：{}\033[0m".format(data))
         
-        # 检查用户名是否已被其他用户使用
-        existing_user = User.query.filter_by(username=data['username']).first()
-        if existing_user and existing_user.id != int(current_user_id):
-            return jsonify({
-                'code': 1,
-                'message': '该用户名已被使用',
-                'data': None
-            }), 400
+        # 检查用户名是否已被其他用户使用（如果提供了用户名）
+        if data.get('username'):
+            print("\033[32m检查用户名是否已被使用：{}\033[0m".format(data['username']))
+            existing_user = User.query.filter_by(username=data['username']).first()
+            print("\033[32m查找到的已存在用户：{}\033[0m".format(existing_user.to_dict() if existing_user else None))
+            if existing_user and existing_user.id != int(current_user_id):
+                return jsonify({
+                    'code': 1,
+                    'message': '该用户名已被使用',
+                    'data': None
+                }), 400
         
         # 检查邮箱是否已被其他用户使用（如果提供了邮箱）
         if data.get('email'):
+            print("\033[32m检查邮箱是否已被使用：{}\033[0m".format(data['email']))
             existing_email = User.query.filter_by(email=data['email']).first()
+            print("\033[32m查找到的已存在邮箱用户：{}\033[0m".format(existing_email.to_dict() if existing_email else None))
             if existing_email and existing_email.id != int(current_user_id):
                 return jsonify({
                     'code': 1,
@@ -502,17 +531,21 @@ def update_profile():
         # 处理头像文件上传
         if 'avatar' in request.files:
             avatar_file = request.files['avatar']
+            print("\033[32m上传的头像文件名：{}\033[0m".format(avatar_file.filename))
             if avatar_file.filename != '':
                 # 删除旧的头像文件（如果存在）
                 if user.avatar and os.path.exists(os.path.join(os.getcwd(), user.avatar)):
                     try:
+                        print("\033[32m尝试删除旧头像文件：{}\033[0m".format(user.avatar))
                         os.remove(os.path.join(os.getcwd(), user.avatar))
-                    except:
-                        # 忽略删除失败的错误
+                        print("\033[32m旧头像文件删除成功\033[0m")
+                    except Exception as e:
+                        print("\033[32m删除旧头像文件失败：{}\033[0m".format(str(e)))
                         pass
 
                 # 保存新的头像文件
                 avatar_path = save_uploaded_file(avatar_file, subfolder='avatars', file_type='avatar')
+                print("\033[32m新头像文件保存路径：{}\033[0m".format(avatar_path))
                 if not avatar_path:
                     return jsonify({
                         'code': 1,
@@ -521,29 +554,39 @@ def update_profile():
                     }), 400
                 user.avatar = avatar_path
         
-        # 更新用户信息
-        user.username = data['username']
-        if data.get('email') is not None:
+        # 更新用户信息（只更新提供的字段）
+        print("\033[32m=== 开始更新用户信息 ===\033[0m")
+        if data.get('username'):
+            print("\033[32m更新用户名：{} -> {}\033[0m".format(user.username, data['username']))
+            user.username = data['username']
+        if 'email' in data:  # 允许设置email为None
+            print("\033[32m更新邮箱：{} -> {}\033[0m".format(user.email, data['email']))
             user.email = data['email']
         
         db.session.commit()
+        print("\033[32m数据库更新成功\033[0m")
+        
+        updated_user = user.to_dict()
+        print("\033[32m更新后的用户信息：{}\033[0m".format(updated_user))
         
         # 返回成功响应
         return jsonify({
             'code': 0,
             'message': '个人信息更新成功',
             'data': {
-                'user': user.to_dict()
+                'user': updated_user
             }
         }), 200
         
     except ValidationError as e:
+        print("\033[32m参数验证失败：{}\033[0m".format(e.messages))
         return jsonify({
             'code': 1,
             'message': '参数验证失败',
             'data': e.messages
         }), 400
     except Exception as e:
+        print("\033[32m更新个人信息失败：{}\033[0m".format(str(e)))
         db.session.rollback()
         return jsonify({
             'code': 2,

@@ -1,8 +1,9 @@
 import os
 from flask import Flask, jsonify
 from flask_jwt_extended import JWTManager
+from flask_cors import CORS
 from models import db, User
-from routes import auth_bp, note_bp
+from routes import auth_bp, note_bp, admin_bp
 from routes.auth import jwt_blocklist
 from config import config
 
@@ -16,6 +17,9 @@ def create_app(config_name='default'):
     # 初始化扩展
     db.init_app(app)
     jwt = JWTManager(app)
+    
+    # 配置CORS以支持跨域请求
+    CORS(app, supports_credentials=True, origins=['*'])
     
     # 配置JWT回调，检查令牌是否在黑名单中
     @jwt.token_in_blocklist_loader
@@ -36,10 +40,12 @@ def create_app(config_name='default'):
     # 注册蓝图
     app.register_blueprint(auth_bp)
     app.register_blueprint(note_bp)
+    app.register_blueprint(admin_bp)
     
-    # 创建数据库表
+    # 创建数据库表（开发环境）
     with app.app_context():
-        db.create_all()
+        if config_name == 'development':
+            db.create_all()
     
     # 基础路由
     @app.route('/')
